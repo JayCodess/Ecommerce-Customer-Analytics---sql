@@ -1,0 +1,27 @@
+# ---- Data (downloaded from Kaggle separately) ----
+/data/
+archive.zip
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# ---- Streamlit secrets ----
+.streamlit/secrets.toml
+
+# ---- Environment / credentials ----
+.env
+*.env.local
+
+# ---- OS junk ----
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ---- IDE ----
+.vscode/
+.idea/
