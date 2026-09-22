@@ -42,6 +42,9 @@ Creates the `olist_ecommerce` database, `olist` schema, all 8 tables with proper
 4. **Churn Detection** — `LAG()`-based personal cadence with 1.5× threshold (≥ 2 orders only)
 5. **Delivery Performance** — Estimated vs. actual delivery bucketing, cross-referenced with review scores
 
+### [`sql/05_views.sql`](sql/05_views.sql) — Phase 6: Dashboard Views
+Wraps each Phase 4 query as a `CREATE OR REPLACE VIEW` so the Streamlit dashboard reads via `SELECT * FROM olist.v_<name>` with zero Python recalculation.
+
 ---
 
 ## Key Modeling Decision: `customer_unique_id`
@@ -106,9 +109,14 @@ data/
 │   ├── 01_setup.sql            # Database + schema + data loading
 │   ├── 02_beginner.sql         # 12 beginner queries
 │   ├── 03_intermediate.sql     # 5 intermediate queries
-│   └── 04_advanced.sql         # 5 advanced analytical queries
+│   ├── 04_advanced.sql         # 5 advanced analytical queries
+│   └── 05_views.sql            # Dashboard views
+├── dashboard/
+│   ├── app.py                  # Streamlit app (5 tabs)
+│   ├── requirements.txt        # Python dependencies
+│   └── .streamlit/config.toml  # Dark theme config
 ├── data/                       # CSVs (gitignored)
-├── NOTES.md                    # Running data quality log (19 entries)
+├── NOTES.md                    # Running data quality log (20 entries)
 ├── README.md                   # This file
 └── .gitignore
 ```
@@ -121,8 +129,30 @@ data/
 |-----------|------|
 | Database | PostgreSQL 18 |
 | Language | SQL (PL/pgSQL-free — pure standard SQL + Postgres extensions) |
+| Dashboard | Streamlit + Plotly (reads from SQL views) |
 | Dataset | [Olist Brazilian E-Commerce](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) (~100K orders, 8 tables) |
 
 ---
 
-> **🚧 Coming next** — Phases 6–7: Streamlit dashboard (interactive charts from SQL views) and Tableau Public workbook.
+## Dashboard
+
+The Streamlit dashboard reads from 5 SQL views — all analytics are computed in PostgreSQL.
+
+```bash
+# Install dependencies
+pip install -r dashboard/requirements.txt
+
+# Run the dashboard
+streamlit run dashboard/app.py
+```
+
+**Tabs:**
+1. **Cohort Retention** — Heatmap showing monthly retention rates
+2. **RFM Segments** — Horizontal bar chart + recency/monetary scatter
+3. **Customer LTV** — Revenue distribution histogram + top 20 table
+4. **Churn Risk** — Active vs. churned donut chart + filterable table
+5. **Delivery Performance** — Order count and avg review by delivery bucket
+
+---
+
+> **🚧 Coming next** — Tableau Public workbook.

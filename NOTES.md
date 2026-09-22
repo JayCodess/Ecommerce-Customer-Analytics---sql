@@ -74,3 +74,10 @@ Delivery performance shows a dramatic satisfaction cliff: Early deliveries (90.4
 
 **19. 90.4% of deliveries arrive early — confirming padded estimates**
 Only 6.8% of delivered orders arrive on-time or late. This reinforces NOTES #13: Olist systematically overestimates delivery times. The 2,878 orders that arrive >7 days late (3.0%) are the ones that truly damage satisfaction, suggesting a bimodal delivery failure mode rather than a gradual degradation.
+
+---
+
+## Phase 6 — Streamlit Dashboard
+
+**20. Views as the single source of truth**
+Five SQL views (`olist.v_cohort_retention`, `v_clv`, `v_rfm_segments`, `v_churn_risk`, `v_delivery_performance`) wrap the Phase 4 queries. The Streamlit app reads via `SELECT * FROM olist.v_<name>` — zero analytical logic in Python. This means the dashboard always reflects the exact same numbers as the raw SQL, and any future query fix propagates automatically.
