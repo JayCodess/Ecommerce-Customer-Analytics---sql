@@ -39,3 +39,19 @@ Sep 2016 has only 4 orders, Oct 2018 has only 4. The dataset's usable range is r
 
 **10. Top payment (R$13,664.08) is legit but disputed**
 Investigated the highest single payment: 8× identical fixed-telephony devices at R$1,680 each, ordered from Rio de Janeiro. Paid in full on credit card. Marked "delivered" but the customer left a 1-star review: "we didn't receive it." Real B2B-style bulk purchase with a delivery dispute — not a data anomaly.
+
+---
+
+## Phase 3 — Intermediate SQL
+
+**11. Higher-value orders get slightly worse reviews**
+Order value tiers show a clear negative correlation with review scores: Low (<R$50) averages 4.19★, Medium (R$50–200) 4.10★, High (R$200–500) 3.98★, Premium (>R$500) 3.88★. This ~0.3-star drop from bottom to top tier is consistent — higher expectations or longer shipping times for bulkier/pricier items likely drive it.
+
+**12. Only 6 sellers are high-volume AND low-rated**
+Out of all sellers with 50+ items sold, only 6 have an average review below 3.0. The worst (seller `1ca7...`) has 136 items across 114 orders with a 2.20★ average and R$13K revenue — enough volume and revenue to be a marketplace risk. The dataset's seller quality is remarkably consistent overall.
+
+**13. Star Sellers dominate the qualifying pool (68%)**
+Among sellers with 30+ items sold (683 total), 465 (68%) qualify as "Star Sellers" (avg rating ≥ 4.0 and deliveries ahead of schedule). Only 6 (0.9%) are "Underperformers." The platform's delivery-ahead-of-estimate pattern (global avg delta = −11.4 days) inflates the Star tier — Olist's estimated delivery dates appear intentionally conservative.
+
+**14. Q1 JOIN fan-out: reviews × order_items produces duplicates**
+The 5-table join in Q1 joins order_reviews on order_id, but an order with 3 items and 1 review produces 3 rows (one per item, each with the same review_score). This is correct for item-level analysis but would overcount reviews if naively aggregated. The composition query (Q5) handles this by aggregating at the seller level, which absorbs the fan-out correctly.
