@@ -51,7 +51,26 @@ Order value tiers show a clear negative correlation with review scores: Low (<R$
 Out of all sellers with 50+ items sold, only 6 have an average review below 3.0. The worst (seller `1ca7...`) has 136 items across 114 orders with a 2.20★ average and R$13K revenue — enough volume and revenue to be a marketplace risk. The dataset's seller quality is remarkably consistent overall.
 
 **13. Star Sellers dominate the qualifying pool (68%)**
-Among sellers with 30+ items sold (683 total), 465 (68%) qualify as "Star Sellers" (avg rating ≥ 4.0 and deliveries ahead of schedule). Only 6 (0.9%) are "Underperformers." The platform's delivery-ahead-of-estimate pattern (global avg delta = −11.4 days) inflates the Star tier — Olist's estimated delivery dates appear intentionally conservative.
+Among sellers with 30+ items sold (683 total), 465 (68%) qualify as "Star Sellers" (avg rating ≥ 4.0 and deliveries ahead of schedule). Only 6 (0.9%) are "Underperformers." The platform's delivery-ahead-of-estimate pattern (global avg delta = −11.4 days) inflates the Star tier — Olist's estimated delivery dates appear intentionally conservative. Note: the −11.4 figure is an average of per-seller averages (not a raw per-order average) and only includes orders with `order_status = 'delivered'`.
 
 **14. Q1 JOIN fan-out: reviews × order_items produces duplicates**
 The 5-table join in Q1 joins order_reviews on order_id, but an order with 3 items and 1 review produces 3 rows (one per item, each with the same review_score). This is correct for item-level analysis but would overcount reviews if naively aggregated. The composition query (Q5) handles this by aggregating at the seller level, which absorbs the fan-out correctly.
+
+---
+
+## Phase 4 — Advanced SQL
+
+**15. Repeat-purchase retention is extremely low (~0.3–0.6% at month 1)**
+Cohort retention rates drop to under 1% by month 1 across all cohorts. E.g., the Jan 2017 cohort (764 customers) retains only 3 (0.39%) at month 1. This is characteristic of marketplace datasets where `customer_unique_id` tracks one-time buyers — most Olist customers make a single purchase. This isn't necessarily alarming for a marketplace model, but it does mean the "retention" metric here measures cross-purchase loyalty, not session-level engagement.
+
+**16. RFM segmentation: 43% Loyal + 16% Champions, but driven by NTILE quirk**
+The RFM scoring produces 41,452 "Loyal Customers" (43.1%) and 15,574 "Champions" (16.2%). This looks inflated because NTILE(5) on a heavily skewed frequency distribution (most customers have exactly 1 order) assigns equal-sized buckets regardless of actual value spread — a customer with 1 order can get f_score=3 or higher simply by being in the top 60% of a mostly-1-order population. The segments are technically correct per the scoring rules but should be interpreted with this caveat.
+
+**17. 76.3% of repeat customers are flagged as churned**
+Of 2,997 customers with 2+ orders (the only ones where churn detection is meaningful), 2,287 (76.3%) exceed their personal 1.5× cadence threshold. This is expected: the dataset ends Oct 2018, and most repeat customers' last orders predate that by months. The churn flag is a snapshot-in-time metric, not a prediction — it's most useful for identifying the 710 "Active" customers who were still purchasing near the dataset boundary.
+
+**18. Late deliveries obliterate review scores: 4.30★ → 1.70★**
+Delivery performance shows a dramatic satisfaction cliff: Early deliveries (90.4% of orders) average 4.30★, On-Time 4.10★, Late by 1–7 days 2.71★, and Late by >7 days 1.70★. The ~1.6-star drop between "Early" and "Late >7 days" is the strongest single predictor of review scores in the dataset. Olist's conservative delivery estimates (avg delta −12.9 days early) appear deliberate to protect satisfaction scores.
+
+**19. 90.4% of deliveries arrive early — confirming padded estimates**
+Only 6.8% of delivered orders arrive on-time or late. This reinforces NOTES #13: Olist systematically overestimates delivery times. The 2,878 orders that arrive >7 days late (3.0%) are the ones that truly damage satisfaction, suggesting a bimodal delivery failure mode rather than a gradual degradation.
