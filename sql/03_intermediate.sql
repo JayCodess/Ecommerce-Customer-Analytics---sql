@@ -1,36 +1,5 @@
--- =============================================================================
--- Olist E-Commerce Analytics — Phase 3: Intermediate SQL
--- =============================================================================
--- Demonstrates multi-table reasoning: JOINs across 3–5 tables, GROUP BY with
--- HAVING filters, correlated subqueries, CASE-based bucketing, and a
--- composition query that combines all techniques.
---
--- All queries use customer_unique_id (not customer_id) for person-level
--- analysis — see NOTES.md entry #3 for rationale.
---
--- Run: psql -U postgres -d olist_ecommerce -f sql/03_intermediate.sql
--- =============================================================================
-
-
--- ---------------------------------------------------------------------------
 -- Q1. Multi-Table JOIN — Full Order Details with English Category Names
--- ---------------------------------------------------------------------------
--- Joins 5 tables to produce one denormalized row per order-item, enriched
--- with the customer's state, the product's English category name, and the
--- review score left on that order.
---
--- Join chain:
---   orders → customers          (customer_id)
---   orders → order_items        (order_id)
---   order_items → products      (product_id)
---   products → translation      (product_category_name)
---   orders → order_reviews      (order_id)
---
--- NOTE: LEFT JOINs on reviews and translation because:
---   - Not every order has a review (edge-case orders at dataset boundaries).
---   - Some products have NULL category names (32 products).
---   - A few Portuguese categories lack an English translation row.
-
+-- LEFT JOIN on reviews/translation — not every order has one
 SELECT
     o.order_id,
     o.order_purchase_timestamp,
@@ -54,17 +23,7 @@ ORDER BY o.order_purchase_timestamp DESC
 LIMIT 20;
 
 
--- ---------------------------------------------------------------------------
 -- Q2. GROUP BY + HAVING — Underperforming Sellers (50+ orders, avg rating < 3)
--- ---------------------------------------------------------------------------
--- Identifies sellers who have meaningful volume (≥ 50 order-items sold) yet
--- consistently receive poor reviews. This requires joining:
---   order_items → orders → order_reviews
--- and filtering at the aggregate level with HAVING.
---
--- Business context: These sellers are high-volume but low-satisfaction — prime
--- candidates for quality audits or marketplace warnings.
-
 SELECT
     oi.seller_id,
     COUNT(DISTINCT o.order_id)    AS total_orders,
@@ -80,17 +39,8 @@ HAVING COUNT(*) >= 50
 ORDER BY avg_review_score ASC, items_sold DESC;
 
 
--- ---------------------------------------------------------------------------
 -- Q3. Subquery — Customers Who Spent More Than the Overall Average
--- ---------------------------------------------------------------------------
--- Two-layer approach:
---   Inner: compute lifetime spend per customer (customer_unique_id)
---   Outer: filter to those above the global average lifetime spend
---
--- Uses a CTE for the per-customer aggregation, then a scalar subquery for
--- the global average. This is cleaner than a correlated subquery and lets
--- us show both techniques (CTE + scalar subquery) in one shot.
-
+-- CTE computes spend once, reused for both the row and the average
 WITH customer_spend AS (
     SELECT
         c.customer_unique_id,
@@ -111,21 +61,7 @@ ORDER BY lifetime_spend DESC
 LIMIT 20;
 
 
--- ---------------------------------------------------------------------------
 -- Q4. CASE Bucketing — Order Value Tiers
--- ---------------------------------------------------------------------------
--- Assigns each order to a spending tier based on its total payment value:
---   Low      < R$50
---   Medium   R$50 – R$200
---   High     R$200 – R$500
---   Premium  > R$500
---
--- Then aggregates to show the count and average review score per tier.
--- This reveals whether higher-value orders correlate with satisfaction.
---
--- Note: order_value is SUM(payment_value) per order because a single order
--- can have multiple payment rows (e.g. credit card + voucher).
-
 WITH order_totals AS (
     SELECT
         o.order_id,
@@ -163,28 +99,8 @@ ORDER BY
     END;
 
 
--- ---------------------------------------------------------------------------
 -- Q5. Composition Query — Seller Performance Dashboard
--- ---------------------------------------------------------------------------
--- Combines every intermediate technique in one query:
---   ✓ Multi-table JOIN (5 tables: order_items → orders → customers → reviews,
---     plus sellers)
---   ✓ GROUP BY + HAVING (only sellers with 30+ items sold)
---   ✓ Subquery (compare each seller's avg delivery delta to the platform avg)
---   ✓ CASE bucketing (performance tier based on review + delivery combo)
---
--- Output: one row per qualifying seller with volume stats, quality metrics,
--- and a computed performance tier.
---
--- Join chain:
---   order_items → orders         (order_id)
---   orders      → order_reviews  (order_id)   — LEFT JOIN, not all reviewed
---   orders      → customers      (customer_id)
---   order_items → sellers        (seller_id)
---
--- Delivery delta = actual delivery date − estimated delivery date (days).
---   Positive = late, negative = early, NULL = not yet delivered.
-
+-- aggregating at seller level avoids the order-item fan-out from the review join
 WITH seller_metrics AS (
     SELECT
         s.seller_id,

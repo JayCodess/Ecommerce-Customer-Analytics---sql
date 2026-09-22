@@ -2,6 +2,9 @@
 /data/
 archive.zip
 
+# ---- Personal study (not for GitHub) ----
+STUDY_ALL_QUERIES.sql
+
 # ---- Python ----
 __pycache__/
 *.pyc
