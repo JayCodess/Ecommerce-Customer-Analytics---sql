@@ -15,7 +15,7 @@ Each SQL file builds on the previous, progressing from simple aggregates to mult
 | 3 | Do higher-value orders get better reviews? | `03_intermediate.sql` | **No** — Premium orders (>R$500) average 3.88★ vs Low (<R$50) at 4.19★ |
 | 4 | Which sellers are high-volume but low-quality? | `03_intermediate.sql` | **Only 6 sellers** with 50+ items and avg rating < 3.0 |
 | 5 | How does cohort retention look? | `04_advanced.sql` | **< 1% at month 1** — typical marketplace one-time buyer pattern |
-| 6 | What customer segments exist (RFM)? | `04_advanced.sql` | 43% Loyal, 16% Champions, 12% Hibernating * |
+| 6 | What customer segments exist (RFM)? | `04_advanced.sql` | 16% Champions, 16% Loyal, 15% Can't Lose Them * |
 | 7 | How many repeat customers have churned? | `04_advanced.sql` | **76.3%** of 2,997 repeat customers (dataset boundary effect) |
 | 8 | How do late deliveries affect reviews? | `04_advanced.sql` | **4.30★ → 1.70★** — late >7 days is the strongest satisfaction predictor |
 
@@ -57,7 +57,7 @@ Olist generates a fresh `customer_id` per order — the same person gets a diffe
 
 ## Notable Data Quality Findings
 
-These are the highlights — the full running log with 19 entries lives in [`NOTES.md`](NOTES.md).
+These are the highlights — the full running log with 24 entries lives in [`NOTES.md`](NOTES.md).
 
 - **Review CSV line count mismatch**: 104,720 lines but only 99,224 records — 5,495 embedded newlines in quoted `review_comment_message` fields. PostgreSQL's CSV parser handles this correctly; naïve line-counting does not.
 - **814 duplicate `review_id` values**: Known Olist data quality issue. Handled with a surrogate `SERIAL` PK instead of deduplication to preserve all rows.
@@ -116,7 +116,7 @@ data/
 │   ├── requirements.txt        # Python dependencies
 │   └── .streamlit/config.toml  # Dark theme config
 ├── data/                       # CSVs (gitignored)
-├── NOTES.md                    # Running data quality log (20 entries)
+├── NOTES.md                    # Running data quality log (24 entries)
 ├── README.md                   # This file
 └── .gitignore
 ```

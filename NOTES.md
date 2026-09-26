@@ -90,3 +90,9 @@ After switching from local Postgres to Supabase (PgBouncer transaction pooler, p
 
 **22. ROUND(double precision, integer) does not exist in Postgres**
 After the server-side aggregation fix, the CLV stats query failed with `function round(double precision, integer) does not exist`. Postgres's `ROUND(val, precision)` overload only accepts `NUMERIC`, not `double precision`. `PERCENTILE_CONT()` returns `double precision`, and `AVG()`/`MAX()` on a `NUMERIC(10,2)` column return `NUMERIC` normally but return `double precision` when the input comes through a view with window functions. Fix: explicit `::NUMERIC` casts before `ROUND()`. This is a recurring Postgres gotcha — `ROUND(x)` (no precision) works on any numeric type, but `ROUND(x, n)` requires `NUMERIC`.
+
+**23. RFM CASE branch ordering causing 4 unreachable segments**
+The initial RFM query had a logic bug in the `CASE` statement order where broader conditions (e.g. `Hibernating` catching `r<=2 AND f<=2`) were evaluated before narrower ones (e.g. `Lost` checking `r=1 AND f=1 AND m=1`), making 4 segments mathematically unreachable (`Need Attention`, `At Risk`, `Can't Lose Them`, and `Lost`). The fix was simply reordering the branches so narrower/exact conditions intercept rows before the broader fallbacks.
+
+**24. Churn view join fan-out inflating order_count**
+In the churn detection query, joining `order_gaps` and `customer_orders` directly on `customer_unique_id` caused a Cartesian fan-out because both tables had multiple rows per customer (one row per gap, and one row per order). This inadvertently inflated the `COUNT(*)` for `order_count`. (Averages and maxes were coincidentally unharmed). The fix was to pre-aggregate both sides to one row per customer in separate CTEs *before* joining them.

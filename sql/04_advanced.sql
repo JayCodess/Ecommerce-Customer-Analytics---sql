@@ -121,6 +121,12 @@ SELECT
     CASE
         WHEN r_score >= 4 AND f_score >= 4 AND m_score >= 4
             THEN 'Champions'
+        WHEN r_score <= 2 AND f_score >= 4 AND m_score >= 4
+            THEN 'Can''t Lose Them'
+        WHEN r_score = 3 AND f_score = 3 AND m_score = 3
+            THEN 'Need Attention'
+        WHEN r_score <= 2 AND f_score >= 3 AND m_score >= 3
+            THEN 'At Risk'
         WHEN f_score >= 3 AND m_score >= 3
             THEN 'Loyal Customers'
         WHEN r_score >= 3 AND f_score >= 2 AND m_score >= 2
@@ -129,18 +135,12 @@ SELECT
             THEN 'New Customers'
         WHEN r_score >= 3 AND f_score <= 2 AND m_score <= 2
             THEN 'Promising'
-        WHEN r_score = 3 AND f_score = 3 AND m_score = 3
-            THEN 'Need Attention'
-        WHEN r_score = 2 AND f_score >= 2
-            THEN 'About to Sleep'
-        WHEN r_score <= 2 AND f_score >= 3 AND m_score >= 3
-            THEN 'At Risk'
-        WHEN r_score <= 2 AND f_score >= 4 AND m_score >= 4
-            THEN 'Can''t Lose Them'
-        WHEN r_score <= 2 AND f_score <= 2
-            THEN 'Hibernating'
         WHEN r_score = 1 AND f_score = 1 AND m_score = 1
             THEN 'Lost'
+        WHEN r_score = 2 AND f_score >= 2
+            THEN 'About to Sleep'
+        WHEN r_score <= 2 AND f_score <= 2
+            THEN 'Hibernating'
         ELSE 'Others'
     END AS segment
 FROM rfm_scored
@@ -175,19 +175,33 @@ order_gaps AS (
     FROM customer_orders
     WHERE prev_order_timestamp IS NOT NULL
 ),
+customer_summary AS (
+    SELECT
+        customer_unique_id,
+        COUNT(*)                      AS order_count,
+        MAX(order_purchase_timestamp) AS last_order_date
+    FROM customer_orders
+    GROUP BY customer_unique_id
+),
+gap_stats AS (
+    SELECT
+        customer_unique_id,
+        ROUND(AVG(days_since_prev), 1) AS avg_days_between
+    FROM order_gaps
+    GROUP BY customer_unique_id
+),
 customer_cadence AS (
     SELECT
-        og.customer_unique_id,
-        COUNT(*) + 1                            AS order_count,
-        ROUND(AVG(og.days_since_prev), 1)       AS avg_days_between,
-        MAX(co.order_purchase_timestamp)         AS last_order_date,
-        EXTRACT(DAY FROM (ref.ref_date - MAX(co.order_purchase_timestamp)))::INT
-                                                AS days_since_last,
-        ROUND(AVG(og.days_since_prev) * 1.5, 1) AS churn_threshold
-    FROM order_gaps og
-    JOIN customer_orders co ON og.customer_unique_id = co.customer_unique_id
+        cs.customer_unique_id,
+        cs.order_count,
+        gs.avg_days_between,
+        cs.last_order_date,
+        EXTRACT(DAY FROM (ref.ref_date - cs.last_order_date))::INT
+            AS days_since_last,
+        ROUND(gs.avg_days_between * 1.5, 1) AS churn_threshold
+    FROM customer_summary cs
+    JOIN gap_stats gs ON cs.customer_unique_id = gs.customer_unique_id
     CROSS JOIN reference ref
-    GROUP BY og.customer_unique_id, ref.ref_date
 )
 SELECT
     customer_unique_id,
