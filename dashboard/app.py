@@ -66,8 +66,13 @@ PLOTLY_LAYOUT = dict(
 # ---------------------------------------------------------------------------
 @st.cache_resource
 def get_engine():
+    # Force psycopg2 driver explicitly to match requirements.txt
+    engine_url = DB_URL
+    if engine_url.startswith("postgresql://"):
+        engine_url = engine_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+        
     return create_engine(
-        DB_URL,
+        engine_url,
         pool_pre_ping=True,
         pool_recycle=300,
         connect_args={
