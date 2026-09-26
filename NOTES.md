@@ -81,3 +81,12 @@ Only 6.8% of delivered orders arrive on-time or late. This reinforces NOTES #13:
 
 **20. Views as the single source of truth**
 Five SQL views (`olist.v_cohort_retention`, `v_clv`, `v_rfm_segments`, `v_churn_risk`, `v_delivery_performance`) wrap the Phase 4 queries. The Streamlit app reads via `SELECT * FROM olist.v_<name>` — zero analytical logic in Python. This means the dashboard always reflects the exact same numbers as the raw SQL, and any future query fix propagates automatically.
+
+**21. Supabase SSL disconnect on large views — `SELECT *` is the enemy**
+After switching from local Postgres to Supabase (PgBouncer transaction pooler, port 6543), `SELECT * FROM olist.v_rfm_segments` (96K rows) and `v_clv` (~99K rows) both failed with `SSL connection has been closed unexpectedly`. Root cause: PgBouncer's aggressive connection timeout kills the SSL socket mid-transfer when the result set takes too long to stream. First attempted fix — `pool_pre_ping`, `pool_recycle`, and TCP keepalives in `create_engine()` — had no effect because the connection wasn't idle; it was actively transferring data when killed. The real fix was pushing aggregation to the server:
+- **RFM**: replaced `SELECT *` (96K rows) with three queries: `GROUP BY segment` (~8 rows), `COUNT/AVG` (1 row), and `ORDER BY RANDOM() LIMIT 5000` (scatter sample).
+- **CLV**: replaced `DISTINCT ON` (96K rows) with `width_bucket()` histogram (~50 rows), `PERCENTILE_CONT/AVG/MAX` summary (1 row), and `ORDER BY cumulative_revenue DESC LIMIT 20` (top 20 table).
+- Cohort (225 rows), churn (3K rows), and delivery (4 rows) were already small enough to survive the pooler.
+
+**22. ROUND(double precision, integer) does not exist in Postgres**
+After the server-side aggregation fix, the CLV stats query failed with `function round(double precision, integer) does not exist`. Postgres's `ROUND(val, precision)` overload only accepts `NUMERIC`, not `double precision`. `PERCENTILE_CONT()` returns `double precision`, and `AVG()`/`MAX()` on a `NUMERIC(10,2)` column return `NUMERIC` normally but return `double precision` when the input comes through a view with window functions. Fix: explicit `::NUMERIC` casts before `ROUND()`. This is a recurring Postgres gotcha — `ROUND(x)` (no precision) works on any numeric type, but `ROUND(x, n)` requires `NUMERIC`.

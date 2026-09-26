@@ -61,16 +61,33 @@ PLOTLY_LAYOUT = dict(
 
 
 # ---------------------------------------------------------------------------
-# Data loading (cached)
+# Data loading (cached) — queries push aggregation to the server so only
+# small result sets travel over the Supabase SSL link.
 # ---------------------------------------------------------------------------
 @st.cache_resource
 def get_engine():
-    return create_engine(DB_URL)
+    return create_engine(
+        DB_URL,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        connect_args={
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
+        },
+    )
 
 
 @st.cache_data(ttl=600)
+def run_query(sql: str) -> pd.DataFrame:
+    with get_engine().connect() as conn:
+        return pd.read_sql(sql, conn)
+
+
 def load_view(view_name: str) -> pd.DataFrame:
-    return pd.read_sql(f"SELECT * FROM olist.{view_name}", get_engine())
+    """Small views only (cohort 225 rows, churn 3K, delivery 4)."""
+    return run_query(f"SELECT * FROM olist.{view_name}")
 
 
 # ---------------------------------------------------------------------------
@@ -195,20 +212,26 @@ with tab1:
 
 # ===== TAB 2: RFM Segments =================================================
 with tab2:
-    df = load_view("v_rfm_segments")
+    # Server-side aggregation — avoids pulling 96K rows over Supabase
+    seg_counts = run_query("""
+        SELECT segment,
+               COUNT(*)          AS count,
+               ROUND(AVG(monetary), 0) AS avg_monetary
+        FROM olist.v_rfm_segments
+        GROUP BY segment
+        ORDER BY count
+    """)
+
+    rfm_totals = run_query("""
+        SELECT COUNT(*)                     AS total,
+               ROUND(AVG(monetary), 0)      AS avg_monetary
+        FROM olist.v_rfm_segments
+    """)
 
     st.markdown("#### Customer Segmentation (RFM)")
     st.caption(
         "Recency × Frequency × Monetary scored 1–5 via NTILE(5). "
         "Segment labels follow standard RFM literature."
-    )
-
-    # Segment distribution
-    seg_counts = (
-        df.groupby("segment")
-        .agg(count=("customer_unique_id", "count"), avg_monetary=("monetary", "mean"))
-        .reset_index()
-        .sort_values("count", ascending=True)
     )
 
     fig = go.Figure()
@@ -231,19 +254,29 @@ with tab2:
     st.plotly_chart(fig, use_container_width=True)
 
     # Metrics
+    total_cust = int(rfm_totals["total"].iloc[0])
+    champ_count = int(seg_counts.loc[seg_counts["segment"] == "Champions", "count"].sum())
+    risk_count = int(seg_counts.loc[
+        seg_counts["segment"].isin(["At Risk", "Hibernating", "About to Sleep"]), "count"
+    ].sum())
+    avg_mon = float(rfm_totals["avg_monetary"].iloc[0])
+
     metric_row([
-        ("Total Customers", f"{len(df):,}", "👤"),
-        ("Champions", f"{len(df[df['segment'] == 'Champions']):,}", "🏆"),
-        ("At Risk + Hibernating",
-         f"{len(df[df['segment'].isin(['At Risk', 'Hibernating', 'About to Sleep'])]):,}",
-         "⚠️"),
-        ("Avg Monetary", f"R${df['monetary'].mean():,.0f}", "💵"),
+        ("Total Customers", f"{total_cust:,}", "👤"),
+        ("Champions", f"{champ_count:,}", "🏆"),
+        ("At Risk + Hibernating", f"{risk_count:,}", "⚠️"),
+        ("Avg Monetary", f"R${avg_mon:,.0f}", "💵"),
     ])
 
-    # Scatter: Recency vs Monetary, colored by segment
+    # Scatter: server-side sample of 5000 rows (not 96K)
     st.markdown("#### Recency vs. Monetary by Segment")
-    # Sample for performance (96K points is too many for scatter)
-    sample = df.sample(n=min(5000, len(df)), random_state=42)
+    sample = run_query("""
+        SELECT recency_days, frequency, monetary,
+               r_score, f_score, m_score, segment
+        FROM olist.v_rfm_segments
+        ORDER BY RANDOM()
+        LIMIT 5000
+    """)
     fig2 = px.scatter(
         sample,
         x="recency_days",
@@ -264,46 +297,92 @@ with tab2:
 
 # ===== TAB 3: Customer LTV =================================================
 with tab3:
-    df = load_view("v_clv")
-
     st.markdown("#### Customer Lifetime Value Distribution")
     st.caption("Running cumulative revenue per customer, ordered by purchase date.")
 
-    # Get final CLV per customer (last row per customer)
-    clv_final = df.sort_values(["customer_unique_id", "order_sequence"]).groupby(
-        "customer_unique_id"
-    ).last().reset_index()
+    # Server-side: binned histogram via width_bucket (~50 rows, not 96K)
+    clv_bins = run_query("""
+        WITH final_clv AS (
+            SELECT DISTINCT ON (customer_unique_id) cumulative_revenue
+            FROM olist.v_clv
+            ORDER BY customer_unique_id, order_sequence DESC
+        ),
+        bounds AS (
+            SELECT MIN(cumulative_revenue) AS lo, MAX(cumulative_revenue) AS hi
+            FROM final_clv
+        )
+        SELECT
+            width_bucket(cumulative_revenue, lo, hi + 0.01, 50) AS bucket,
+            ROUND(lo + (width_bucket(cumulative_revenue, lo, hi + 0.01, 50) - 1)
+                  * ((hi - lo) / 50), 0)                        AS bin_lo,
+            ROUND(lo + width_bucket(cumulative_revenue, lo, hi + 0.01, 50)
+                  * ((hi - lo) / 50), 0)                        AS bin_hi,
+            COUNT(*)                                             AS customers
+        FROM final_clv CROSS JOIN bounds
+        GROUP BY bucket, lo, hi
+        ORDER BY bucket
+    """)
 
-    # CLV distribution histogram
-    fig = px.histogram(
-        clv_final,
-        x="cumulative_revenue",
-        nbins=80,
-        labels={"cumulative_revenue": "Lifetime Revenue (R$)"},
-        color_discrete_sequence=[COLORS["purple"]],
-    )
+    # Server-side: summary stats (1 row)
+    clv_stats = run_query("""
+        WITH final_clv AS (
+            SELECT DISTINCT ON (customer_unique_id)
+                   cumulative_revenue, order_sequence
+            FROM olist.v_clv
+            ORDER BY customer_unique_id, order_sequence DESC
+        )
+        SELECT
+            ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY cumulative_revenue)::NUMERIC, 0) AS median,
+            ROUND(AVG(cumulative_revenue)::NUMERIC, 0)  AS mean,
+            ROUND(MAX(cumulative_revenue)::NUMERIC, 0)  AS max,
+            COUNT(*) FILTER (WHERE order_sequence > 1) AS multi_order
+        FROM final_clv
+    """)
+
+    # Server-side: top 20 (20 rows)
+    top20 = run_query("""
+        WITH final_clv AS (
+            SELECT DISTINCT ON (customer_unique_id)
+                   customer_unique_id, order_sequence, cumulative_revenue
+            FROM olist.v_clv
+            ORDER BY customer_unique_id, order_sequence DESC
+        )
+        SELECT customer_unique_id, order_sequence, cumulative_revenue
+        FROM final_clv
+        ORDER BY cumulative_revenue DESC
+        LIMIT 20
+    """)
+
+    # Histogram from pre-binned data
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=clv_bins["bin_lo"],
+        y=clv_bins["customers"],
+        width=(clv_bins["bin_hi"] - clv_bins["bin_lo"]) * 0.95,
+        marker_color=COLORS["purple"],
+        hovertemplate="R$%{x:,.0f}: %{y:,} customers<extra></extra>",
+    ))
     fig.update_layout(
         **PLOTLY_LAYOUT,
         height=400,
+        xaxis_title="Lifetime Revenue (R$)",
         yaxis_title="Number of Customers",
         bargap=0.05,
     )
     st.plotly_chart(fig, use_container_width=True)
 
     # Metrics
+    stats = clv_stats.iloc[0]
     metric_row([
-        ("Median LTV", f"R${clv_final['cumulative_revenue'].median():,.0f}", "📊"),
-        ("Mean LTV", f"R${clv_final['cumulative_revenue'].mean():,.0f}", "📈"),
-        ("Max LTV", f"R${clv_final['cumulative_revenue'].max():,.0f}", "🔝"),
-        ("Multi-Order Customers", f"{len(clv_final[clv_final['order_sequence'] > 1]):,}", "🔄"),
+        ("Median LTV", f"R${stats['median']:,.0f}", "📊"),
+        ("Mean LTV", f"R${stats['mean']:,.0f}", "📈"),
+        ("Max LTV", f"R${stats['max']:,.0f}", "🔝"),
+        ("Multi-Order Customers", f"{int(stats['multi_order']):,}", "🔄"),
     ])
 
-    # Top 20 customers by LTV
+    # Top 20 table
     st.markdown("#### Top 20 Customers by Lifetime Value")
-    top20 = clv_final.nlargest(20, "cumulative_revenue")[
-        ["customer_unique_id", "order_sequence", "cumulative_revenue"]
-    ].reset_index(drop=True)
-    top20.index = top20.index + 1
+    top20.index = range(1, len(top20) + 1)
     top20.columns = ["Customer ID", "Orders", "Lifetime Revenue (R$)"]
     top20["Lifetime Revenue (R$)"] = top20["Lifetime Revenue (R$)"].apply(
         lambda x: f"R${x:,.2f}"
