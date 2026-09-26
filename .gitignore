@@ -14,7 +14,7 @@ venv/
 *.egg-info/
 
 # ---- Streamlit secrets ----
-.streamlit/secrets.toml
+**/.streamlit/secrets.toml
 
 # ---- Environment / credentials ----
 .env
